@@ -66,7 +66,13 @@ from vllm.tracing import instrument
 from vllm.utils.gc_utils import freeze_gc_heap, maybe_attach_gc_debug_callback
 from vllm.utils.gpu_sync_debug import enable_gpu_sync_check, with_gpu_sync_check
 from vllm.utils.mem_constants import GiB_bytes
-from vllm.utils.mem_utils import MemorySnapshot, format_gib, memory_profiling
+from vllm.utils.mem_utils import (
+    MemorySnapshot,
+    format_gib,
+    limit_torch_allocator_to_budget,
+    memory_profiling,
+    unified_memory_allocator_ceiling_bytes,
+)
 from vllm.utils.torch_utils import set_random_seed, set_torch_threads_for_runtime
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
@@ -471,6 +477,20 @@ class Worker(WorkerBase):
         with set_current_vllm_config(self.vllm_config):
             self.model_runner.reload_weights(*args, **kwargs)
 
+    def _profile_run_guarded(self) -> None:
+        try:
+            self.model_runner.profile_run()
+        except torch.OutOfMemoryError as e:
+            assert self.device is not None
+            device_index = self.device.index if self.device.index is not None else 0
+            if not current_platform.is_integrated_gpu(device_index):
+                raise
+            raise torch.OutOfMemoryError(
+                "Startup profiling exceeded the host-safety ceiling on an "
+                "integrated GPU. Reduce max_num_batched_tokens, max_num_seqs, "
+                "max_model_len, or gpu_memory_utilization and retry."
+            ) from e
+
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
         """Profiles the peak memory usage of the model to determine how much
@@ -486,10 +506,19 @@ class Worker(WorkerBase):
         """
         maybe_apply_startup_plan(self)
 
+        limit_torch_allocator_to_budget(
+            self.device,
+            unified_memory_allocator_ceiling_bytes(
+                self.init_snapshot.total_memory,
+                self.cache_config.gpu_memory_utilization,
+            ),
+            self.init_snapshot.total_memory,
+        )
+
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for
             # max_num_batched_tokens
-            self.model_runner.profile_run()
+            self._profile_run_guarded()
 
             msg = (
                 f"Initial free memory {format_gib(self.init_snapshot.free_memory)} "
@@ -516,7 +545,7 @@ class Worker(WorkerBase):
             self.init_snapshot,
             weights_memory=int(self.model_runner.model_memory_usage),
         ) as profile_result:
-            self.model_runner.profile_run()
+            self._profile_run_guarded()
 
         # Profile CUDA graph memory if graphs will be captured.
         # ROCm is included: #44825 moved the profiler to
