@@ -33,7 +33,7 @@ from ..utils import swiglu_limit_func
 logger = init_logger(__name__)
 
 
-def _triton_kernel_moe_supports_current_device() -> bool:
+def _triton_kernel_moe_supports_current_device(*, allow_sm110: bool = False) -> bool:
     # Shared device gate for the OAI Triton MoE expert classes.
     # Platform-aware to avoid ROCm capability aliasing — cap (9, 0)
     # matches both gfx90a (verified) and gfx906 (unverified), so we
@@ -41,11 +41,10 @@ def _triton_kernel_moe_supports_current_device() -> bool:
     p = current_platform
     if p.is_cuda():
         cap = p.get_device_capability()
-        # Keep the original `(9, 0) <= cap < (11, 0)` window on
-        # CUDA (covers Hopper SM90 and Blackwell SM100, excludes
-        # SM120) — this PR is ROCm-scoped and the broader CUDA
-        # range was not validated.
-        return cap is not None and (9, 0) <= (cap.major, cap.minor) < (11, 0)
+        return cap is not None and (
+            (9, 0) <= (cap.major, cap.minor) < (11, 0)
+            or (allow_sm110 and (cap.major, cap.minor) == (11, 0))
+        )
     if p.is_rocm():
         from vllm.platforms.rocm import on_gfx1x, on_gfx9
 
@@ -1052,6 +1051,15 @@ class UnfusedOAITritonExperts(LoRAExpertsMixin, BaseOAITritonExperts):
 
     One use case for it is to inject LoRA modules on the activation and moe_sum.
     """
+
+    @staticmethod
+    def _supports_current_device() -> bool:
+        # DeepSeek V4 uses this unfused W4A16 path on Thor. Keep the SM110
+        # exception local so GPT-OSS and monolithic Triton selection do not
+        # change without their own hardware validation.
+        return _triton_kernel_moe_supports_current_device(
+            allow_sm110=True
+        ) and has_triton_kernels()
 
     @staticmethod
     def _supports_activation(activation: MoEActivation) -> bool:

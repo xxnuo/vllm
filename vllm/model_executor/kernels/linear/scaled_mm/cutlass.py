@@ -286,6 +286,8 @@ class CutlassFp8BlockScaledMMKernel(Fp8BlockScaledMMLinearKernel):
 
     @classmethod
     def is_supported(cls, compute_capability=None):
+        if compute_capability == 110:
+            return False, "SM110 uses the Triton block-FP8 fallback"
         if not CUTLASS_BLOCK_FP8_SUPPORTED:
             return (
                 False,

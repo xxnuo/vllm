@@ -500,7 +500,12 @@ def _use_k3_situ_aiter(moe: FusedMoEConfig) -> bool:
 class Mxfp4MoEMethod(FusedMoEMethodBase):
     """MXFP4 MoE quantization method."""
 
-    def __init__(self, moe: FusedMoEConfig):
+    def __init__(
+        self,
+        moe: FusedMoEConfig,
+        *,
+        allow_auto_triton_unfused: bool = True,
+    ):
         super().__init__(moe)
         self.weight_dtype = "mxfp4"
         self.is_k3_situ_aiter = _use_k3_situ_aiter(moe)
@@ -519,7 +524,8 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 os.environ["AITER_BF16_FP8_MOE_BOUND"] = "0"
         else:
             self.mxfp4_backend, self.experts_cls = select_deepseek_v4_mxfp4_moe_backend(
-                moe
+                moe,
+                allow_auto_triton_unfused=allow_auto_triton_unfused,
             )
 
         self.max_capture_size = moe.max_capture_size
