@@ -78,6 +78,7 @@ from vllm.models.deepseek_v4.nvidia.flashinfer_sparse import (
 )
 from vllm.models.deepseek_v4.nvidia.flashmla import DeepseekV4FlashMLAAttention
 from vllm.models.deepseek_v4.nvidia.ops.prepare_megamoe import prepare_megamoe_inputs
+from vllm.models.deepseek_v4.nvidia.thor import DeepseekV4ThorAttention
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.utils.math_utils import cdiv
@@ -772,6 +773,11 @@ def _select_dsv4_attn_cls(vllm_config: VllmConfig) -> type[DeepseekV4Attention]:
     """
     backend = vllm_config.attention_config.backend
     device_capability = current_platform.get_device_capability()
+    is_thor = device_capability is not None and tuple(device_capability) == (11, 0)
+    if backend == AttentionBackendEnum.THOR_MLA_SPARSE_DSV4:
+        if not is_thor:
+            raise ValueError("THOR_MLA_SPARSE_DSV4 requires CUDA SM110.")
+        return DeepseekV4ThorAttention
     if backend in (
         AttentionBackendEnum.FLASHINFER_MLA_SPARSE,
         AttentionBackendEnum.FLASHINFER_MLA_SPARSE_SM120,
@@ -782,6 +788,8 @@ def _select_dsv4_attn_cls(vllm_config: VllmConfig) -> type[DeepseekV4Attention]:
             "sparse MLA."
         )
     if backend == AttentionBackendEnum.FLASHINFER_MLA_SPARSE_DSV4:
+        if is_thor:
+            return DeepseekV4ThorAttention
         if device_capability is not None and device_capability.major == 12:
             return DeepseekV4FlashInferSM120Attention
         return DeepseekV4FlashInferMLAAttention
@@ -789,8 +797,12 @@ def _select_dsv4_attn_cls(vllm_config: VllmConfig) -> type[DeepseekV4Attention]:
         AttentionBackendEnum.FLASHMLA_SPARSE,
         AttentionBackendEnum.FLASHMLA_SPARSE_DSV4,
     ):
+        if is_thor:
+            return DeepseekV4ThorAttention
         return DeepseekV4FlashMLAAttention
 
+    if is_thor:
+        return DeepseekV4ThorAttention
     if device_capability is not None and device_capability.major == 12:
         return DeepseekV4FlashInferSM120Attention
     return DeepseekV4FlashMLAAttention
@@ -1524,6 +1536,9 @@ class DeepseekV4ForCausalLM(
 
     def process_weights_after_loading(self) -> None:
         self.model.finalize_mega_moe_weights()
+        self.model.finalize_mhc_broadcast_weights()
+
+    def process_weights_after_loading(self) -> None:
         self.model.finalize_mhc_broadcast_weights()
 
     def get_expert_mapping(self) -> list[tuple[str, str, int, str]]:
