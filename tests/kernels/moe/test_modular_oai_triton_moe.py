@@ -36,6 +36,10 @@ from vllm.model_executor.layers.fused_moe.experts.gpt_oss_triton_kernels_moe imp
     UnfusedOAITritonExperts,
 )
 from vllm.model_executor.layers.fused_moe.modular_kernel import FusedMoEKernel
+from vllm.model_executor.layers.fused_moe.oracle.mxfp4 import (
+    Mxfp4MoeBackend,
+    select_deepseek_v4_mxfp4_moe_backend,
+)
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import set_random_seed
 
@@ -63,6 +67,57 @@ def deepseek_v4_flash_moe_topology():
     }
 
     return defaults
+
+
+def test_only_unfused_oai_triton_experts_support_thor(monkeypatch):
+    """Keep the SM110 exception local to the DeepSeek V4 fallback class."""
+    import vllm.model_executor.layers.fused_moe.experts.gpt_oss_triton_kernels_moe as moe  # noqa: E501
+    from vllm.platforms.interface import DeviceCapability
+
+    monkeypatch.setattr(moe.current_platform, "is_cuda", lambda: True)
+    monkeypatch.setattr(moe.current_platform, "is_rocm", lambda: False)
+    for capability, unfused_expected in [
+        ((11, 0), True),
+        ((11, 1), False),
+        ((12, 0), False),
+    ]:
+        monkeypatch.setattr(
+            moe.current_platform,
+            "get_device_capability",
+            lambda capability=capability: DeviceCapability(*capability),
+        )
+        assert UnfusedOAITritonExperts._supports_current_device() is unfused_expected
+        assert OAITritonExperts._supports_current_device() is False
+
+
+def test_deepseek_v4_mxfp4_auto_selects_unfused_triton_on_thor(monkeypatch):
+    """DeepSeek V4 MXFP4 auto mode prefers Triton on Thor."""
+    import vllm.model_executor.layers.fused_moe.experts.gpt_oss_triton_kernels_moe as triton_moe  # noqa: E501
+    import vllm.model_executor.layers.fused_moe.oracle.mxfp4 as mxfp4
+    from vllm.model_executor.layers.fused_moe.config import RoutingMethodType
+    from vllm.platforms.interface import DeviceCapability
+
+    config = make_dummy_moe_config(
+        num_experts=32,
+        experts_per_token=6,
+        hidden_dim=512,
+        intermediate_size=256,
+        activation=MoEActivation.SILU,
+    )
+    config.routing_method = RoutingMethodType.DeepseekV4
+    monkeypatch.setattr(mxfp4.current_platform, "is_cuda", lambda: True)
+    monkeypatch.setattr(mxfp4.current_platform, "is_rocm", lambda: False)
+    monkeypatch.setattr(
+        mxfp4.current_platform,
+        "get_device_capability",
+        lambda: DeviceCapability(11, 0),
+    )
+    monkeypatch.setattr(triton_moe, "has_triton_kernels", lambda: True)
+
+    backend, experts_cls = select_deepseek_v4_mxfp4_moe_backend(config)
+
+    assert backend == Mxfp4MoeBackend.TRITON_UNFUSED
+    assert experts_cls is UnfusedOAITritonExperts
 
 
 def scaled_deepseek_v4_flash_problem(

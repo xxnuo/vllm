@@ -158,6 +158,38 @@ def test_w8a8_block_fp8_matmul(M, N, K, block_size, out_dtype, seed):
     assert rel_diff < 0.001
 
 
+@torch.inference_mode()
+def test_w8a8_block_fp8_matmul_e8m0_scales():
+    torch.manual_seed(0)
+    M, N, K = 7, 512, 4096
+    block_size = [128, 128]
+    fp8_dtype = current_platform.fp8_dtype()
+    fp8_max = torch.finfo(fp8_dtype).max
+
+    A = ((torch.rand(M, K) - 0.5) * 2 * fp8_max).to(fp8_dtype)
+    B = ((torch.rand(N, K) - 0.5) * 2 * fp8_max).to(fp8_dtype)
+    As = torch.randint(120, 128, (M, K // 128), dtype=torch.uint8).view(
+        torch.float8_e8m0fnu
+    )
+    Bs = torch.randint(120, 128, (N // 128, K // 128), dtype=torch.uint8).view(
+        torch.float8_e8m0fnu
+    )
+
+    As_fp32 = As.view(torch.uint8).to(torch.int32).mul(1 << 23).view(torch.float32)
+    Bs_fp32 = Bs.view(torch.uint8).to(torch.int32).mul(1 << 23).view(torch.float32)
+    ref = native_w8a8_block_matmul(
+        A, B, As_fp32, Bs_fp32, block_size, torch.bfloat16
+    )
+    out = w8a8_triton_block_scaled_mm(
+        A, B, As, Bs, block_size, torch.bfloat16
+    )
+
+    rel_diff = torch.mean((out.float() - ref.float()).abs()) / torch.mean(
+        ref.float().abs()
+    )
+    assert rel_diff < 0.001
+
+
 @pytest.mark.skipif(
     not current_platform.is_cuda(), reason="CUTLASS only supported on CUDA platform."
 )

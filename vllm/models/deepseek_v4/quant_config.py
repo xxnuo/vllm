@@ -17,6 +17,7 @@ from vllm.model_executor.layers.quantization.mxfp4 import Mxfp4MoEMethod
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     is_layer_skipped,
 )
+from vllm.model_executor.models.utils import extract_layer_index
 
 _DEEPSEEK_V4_EXPERT_DTYPES = ("fp4", "fp8")
 
@@ -188,7 +189,16 @@ class DeepseekV4FP8Config(Fp8Config):
                         quant_config=self._get_nvfp4_config(),
                         moe_config=layer.moe_config,
                     )
-                return Mxfp4MoEMethod(layer.moe_config)
+                num_hidden_layers = (
+                    get_current_vllm_config()
+                    .model_config.get_total_num_hidden_layers()
+                )
+                return Mxfp4MoEMethod(
+                    layer.moe_config,
+                    allow_auto_triton_unfused=(
+                        extract_layer_index(prefix) < num_hidden_layers
+                    ),
+                )
             # expert_dtype == "fp8": fall through to Fp8Config which
             # returns Fp8MoEMethod with block-wise float32 scales.
         return super().get_quant_method(layer, prefix)

@@ -562,6 +562,8 @@ def select_mxfp4_moe_backend(
 
 def select_deepseek_v4_mxfp4_moe_backend(
     config: FusedMoEConfig,
+    *,
+    allow_auto_triton_unfused: bool = True,
 ) -> tuple[Mxfp4MoeBackend, type[mk.FusedMoEExperts] | None]:
     """
     Select the MXFP4 MoE backend with MXFP8 activation as top priority.
@@ -598,9 +600,26 @@ def select_deepseek_v4_mxfp4_moe_backend(
         assert last_error is not None
         raise last_error
 
-    # DeepSeek-V4 on ROCm: prefer AITER FlyDSL MoE (better perf + accuracy
-    # after shuffle/TP-offset fixes), with Triton-unfused as fallback.
-    if (
+    # DeepSeek-V4 uses the modular Triton fallback on Thor SM110, where the
+    # vendor FP4 kernels are unavailable. Keep the capability check exact.
+    device_capability = current_platform.get_device_capability()
+    is_thor_dsv4 = (
+        current_platform.is_cuda()
+        and device_capability is not None
+        and (device_capability.major, device_capability.minor) == (11, 0)
+        and config.routing_method == RoutingMethodType.DeepseekV4
+    )
+    if is_thor_dsv4:
+        # Vendor FP4 kernels are not available on Thor. Keep Marlin as the
+        # fallback when the optional triton_kernels package is absent or the
+        # activation format is incompatible with the unfused expert path.
+        priority_backends = [
+            Mxfp4MoeBackend.MARLIN,
+            Mxfp4MoeBackend.BATCHED_MARLIN,
+        ]
+        if allow_auto_triton_unfused:
+            priority_backends.insert(0, Mxfp4MoeBackend.TRITON_UNFUSED)
+    elif (
         current_platform.is_rocm()
         and config.routing_method == RoutingMethodType.DeepseekV4
     ):
