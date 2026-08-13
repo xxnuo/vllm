@@ -409,7 +409,12 @@ def dequantize_and_gather_k_cache(
     ``current_platform.is_fp8_fnuz()`` for ``swa_k_cache`` (C++ encoder
     writes FNUZ on gfx942 and OCP on gfx950).
     """
-    if has_cutedsl():
+    capability = current_platform.get_device_capability()
+    is_sm110 = capability is not None and (capability.major, capability.minor) == (
+        11,
+        0,
+    )
+    if has_cutedsl() and not is_sm110:
         # lazily import, otherwise some tests fail due to CUDA driver init failure.
         from vllm.models.deepseek_v4.nvidia.ops.dequant_gather_k_cutedsl import (
             dequantize_and_gather_k_cache_cutedsl,

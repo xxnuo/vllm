@@ -13,16 +13,56 @@ from vllm.models.deepseek_v4.nvidia.dspark import DSparkDeepseekV4ForCausalLM
 from vllm.models.deepseek_v4.nvidia.model import (
     DeepseekV4ForCausalLM,
     DeepseekV4MegaMoEExperts,
+    DeepseekV4ThorAttention,
+    _select_dsv4_attn_cls,
     make_deepseek_v4_expert_params_mapping,
 )
 from vllm.models.deepseek_v4.nvidia.mtp import DeepSeekV4MTP
 from vllm.models.deepseek_v4.nvidia.ops.prepare_megamoe import prepare_megamoe_inputs
 from vllm.platforms import current_platform
+from vllm.platforms.interface import DeviceCapability
+from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
 pytestmark = pytest.mark.skipif(
     not current_platform.is_cuda(),
     reason="DeepSeek V4 MegaMoE requires CUDA",
 )
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        None,
+        AttentionBackendEnum.THOR_MLA_SPARSE_DSV4,
+        AttentionBackendEnum.FLASHMLA_SPARSE_DSV4,
+        AttentionBackendEnum.FLASHINFER_MLA_SPARSE_DSV4,
+    ],
+)
+def test_deepseek_v4_thor_attention_selection(monkeypatch, backend):
+    monkeypatch.setattr(
+        current_platform,
+        "get_device_capability",
+        lambda: DeviceCapability(11, 0),
+    )
+    config = SimpleNamespace(attention_config=SimpleNamespace(backend=backend))
+
+    assert _select_dsv4_attn_cls(config) is DeepseekV4ThorAttention
+
+
+def test_deepseek_v4_thor_attention_requires_sm110(monkeypatch):
+    monkeypatch.setattr(
+        current_platform,
+        "get_device_capability",
+        lambda: DeviceCapability(10, 0),
+    )
+    config = SimpleNamespace(
+        attention_config=SimpleNamespace(
+            backend=AttentionBackendEnum.THOR_MLA_SPARSE_DSV4
+        )
+    )
+
+    with pytest.raises(ValueError, match="requires CUDA SM110"):
+        _select_dsv4_attn_cls(config)
 
 
 def test_deepseek_v4_mega_moe_expert_mapping():
