@@ -835,7 +835,8 @@ def cutlass_scaled_mm_azp(
 
 
 def cutlass_group_gemm_supported(cuda_device_capability: int) -> bool:
-    if cuda_device_capability < 90 or cuda_device_capability >= 110:
+    # The sm100-named kernel is built for SM10x and SM11x on CUDA 13.
+    if cuda_device_capability < 90 or cuda_device_capability >= 120:
         return False
     try:
         return torch.ops._C.cutlass_group_gemm_supported(cuda_device_capability)

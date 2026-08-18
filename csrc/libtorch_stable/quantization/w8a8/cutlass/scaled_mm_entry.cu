@@ -175,8 +175,8 @@ bool cutlass_scaled_mm_supports_block_fp8(int64_t cuda_device_capability) {
 
 bool cutlass_group_gemm_supported(int64_t cuda_device_capability) {
   // CUTLASS grouped FP8 kernels need at least CUDA 12.3 and SM90 (Hopper)
-  // or CUDA 12.8 and SM100 (Blackwell). Only report archs that have an
-  // actual cutlass_moe_mm dispatch compiled into this file.
+  // or CUDA 12.8 and SM10x/SM11x (Blackwell/Thor). Only report archs that
+  // have an actual cutlass_moe_mm dispatch compiled into this file.
 
 #if defined CUDA_VERSION
   #if defined ENABLE_CUTLASS_MOE_SM100 && ENABLE_CUTLASS_MOE_SM100
@@ -282,7 +282,8 @@ void cutlass_moe_mm(torch::stable::Tensor& out_tensors,
                     bool per_out_ch) {
   int32_t version_num = get_sm_version_num();
 #if defined ENABLE_CUTLASS_MOE_SM100 && ENABLE_CUTLASS_MOE_SM100
-  if (version_num >= 100 && version_num < 110) {
+  // The implementation is named sm100 but CMake also builds it for SM110.
+  if (version_num >= 100 && version_num < 120) {
     cutlass_moe_mm_sm100(out_tensors, a_tensors, b_tensors, a_scales, b_scales,
                          expert_offsets, problem_sizes, a_strides, b_strides,
                          c_strides, per_act_token, per_out_ch);
@@ -300,7 +301,7 @@ void cutlass_moe_mm(torch::stable::Tensor& out_tensors,
   STD_TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "No compiled cutlass_scaled_mm for CUDA device capability: ", version_num,
-      ". Required capability: 90 or 100");
+      ". Required capability: 90, 100, or 110");
 }
 
 void get_cutlass_moe_mm_data(
