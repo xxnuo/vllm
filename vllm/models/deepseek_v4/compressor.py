@@ -46,7 +46,11 @@ def _prefer_two_stage_compressor() -> bool:
 def _use_cutedsl_compressor(head_dim: int, kv_cache_dtype: torch.dtype) -> bool:
     if head_dim != 512:
         return False
-    if current_platform.is_cuda() and has_cutedsl():
+    if (
+        current_platform.is_cuda()
+        and not current_platform.is_device_capability(110)
+        and has_cutedsl()
+    ):
         return True
     if kv_cache_dtype != torch.uint8:
         raise RuntimeError(
