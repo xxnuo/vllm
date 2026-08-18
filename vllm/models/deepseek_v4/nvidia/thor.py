@@ -14,8 +14,10 @@ from vllm.models.deepseek_v4.nvidia.flashmla import DeepseekV4FlashMLAAttention
 from vllm.models.deepseek_v4.sparse_mla import DeepseekV4FlashMLABackend
 from vllm.platforms.interface import DeviceCapability
 from vllm.v1.attention.ops.rocm_aiter_mla_sparse import (
-    _rocm_sparse_attn_decode_triton,
-    _rocm_sparse_attn_prefill_triton,
+    # Despite the module name, these entry points are platform-neutral Triton
+    # fallbacks. CUDA leaves the ROCm-only tuned branches disabled.
+    _rocm_sparse_attn_decode_triton as _triton_sparse_attn_decode,
+    _rocm_sparse_attn_prefill_triton as _triton_sparse_attn_prefill,
 )
 from vllm.v1.worker.workspace import current_workspace_manager
 
@@ -80,7 +82,7 @@ class DeepseekV4ThorAttention(DeepseekV4FlashMLAAttention):
         assert swa_metadata.decode_swa_indices is not None
         assert swa_metadata.decode_swa_lens is not None
         main_indices = swa_metadata.decode_swa_indices.reshape(num_decode_tokens, -1)
-        attn_out = _rocm_sparse_attn_decode_triton(
+        attn_out = _triton_sparse_attn_decode(
             q=q,
             main_cache=self.swa_cache_layer.kv_cache,
             main_indices=main_indices,
@@ -192,7 +194,7 @@ class DeepseekV4ThorAttention(DeepseekV4FlashMLAAttention):
                 chunk_m,
                 chunk_n,
             )
-            out = _rocm_sparse_attn_prefill_triton(
+            out = _triton_sparse_attn_prefill(
                 q=q[query_start:query_end],
                 kv=kv.view(-1, q.shape[-1]),
                 indices=combined_indices,
