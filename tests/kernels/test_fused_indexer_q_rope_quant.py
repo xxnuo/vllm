@@ -23,6 +23,7 @@ from vllm import _custom_ops as ops
 from vllm.model_executor.layers.quantization.utils.fp8_utils import (
     per_token_group_quant_fp8,
 )
+from vllm.models.deepseek_v4.common.ops import fused_indexer_q as fused_indexer_q_module
 from vllm.models.deepseek_v4.common.ops import fused_indexer_q_rope_quant
 from vllm.utils.import_utils import has_cutedsl
 
@@ -30,6 +31,17 @@ HEAD_DIM = 128
 ROPE_DIM = 64
 N_HEAD = 64
 MAX_POS = 4096
+
+
+def test_fused_indexer_avoids_cutedsl_on_sm110(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fused_indexer_q_module, "has_cutedsl", lambda: True)
+    monkeypatch.setattr(
+        fused_indexer_q_module.current_platform,
+        "is_device_capability",
+        lambda capability: capability == 110,
+    )
+
+    assert not fused_indexer_q_module._use_cutedsl_indexer()
 
 
 def quantize_to_mxfp4(

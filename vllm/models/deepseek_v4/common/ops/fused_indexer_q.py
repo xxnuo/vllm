@@ -26,6 +26,10 @@ def _get_cos_sin(
     return cos, sin
 
 
+def _use_cutedsl_indexer() -> bool:
+    return has_cutedsl() and not current_platform.is_device_capability(110)
+
+
 @triton.jit
 def _fp32x2_to_fp4x2(x_lo, x_hi):
     # NOTE: $1 is high nibble, $2 is low nibble
@@ -364,7 +368,7 @@ def fused_indexer_q_rope_quant(
             index_q_packed, index_q_scale, _ = output_buffers
         assert index_q_packed.shape == packed_shape
         assert index_q_scale.shape == scale_shape
-        if has_cutedsl():
+        if _use_cutedsl_indexer():
             # lazily import, otherwise some tests fail due to CUDA driver init failure.
             from vllm.models.deepseek_v4.nvidia.ops.fused_indexer_q_cutedsl import (
                 fused_indexer_q_rope_quant_mxfp4_cutedsl,
@@ -437,7 +441,7 @@ def fused_indexer_q_rope_quant(
     else:
         index_q_fp8, _ = output_buffers
         assert index_q_fp8.shape == index_q.shape
-    if has_cutedsl():
+    if _use_cutedsl_indexer():
         # lazily import, otherwise some tests fail due to CUDA driver init failure.
         from vllm.models.deepseek_v4.nvidia.ops.fused_indexer_q_cutedsl import (
             fused_indexer_q_rope_quant_fp8_cutedsl,

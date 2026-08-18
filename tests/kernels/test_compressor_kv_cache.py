@@ -35,6 +35,7 @@ from vllm.models.deepseek_v4.compressor import (
     CompressorMetadata,
     DeepseekCompressor,
     _get_c128_boundary,
+    _use_cutedsl_compressor,
 )
 from vllm.platforms import current_platform
 from vllm.v1.attention.backends.mla.compressor_utils import (
@@ -57,6 +58,18 @@ def _on_gfx950() -> bool:
         return _ON_GFX950
     except Exception:
         return False
+
+
+def test_compressor_avoids_cutedsl_on_sm110(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(compressor_module.current_platform, "is_cuda", lambda: True)
+    monkeypatch.setattr(
+        compressor_module.current_platform,
+        "is_device_capability",
+        lambda capability: capability == 110,
+    )
+    monkeypatch.setattr(compressor_module, "has_cutedsl", lambda: True)
+
+    assert not _use_cutedsl_compressor(512, torch.uint8)
 
 
 def _make_compressor_forward_case(
