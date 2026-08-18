@@ -214,9 +214,7 @@ def test_mhc_pre_broadcast_tilelang_without_deepgemm(num_tokens, monkeypatch):
     hc_mult = 4
     hc_mult3 = hc_mult * (2 + hc_mult)
     residual = torch.randn((num_tokens, hidden_size), dtype=torch.bfloat16)
-    fn = torch.randn(
-        (hc_mult3, hc_mult * hidden_size), dtype=torch.float32
-    ) * 1e-4
+    fn = torch.randn((hc_mult3, hc_mult * hidden_size), dtype=torch.float32) * 1e-4
     fn_broadcast = fn.view(hc_mult3, hc_mult, hidden_size).sum(dim=1)
     hc_scale = torch.randn((3,), dtype=torch.float32) * 0.1
     hc_base = torch.randn((hc_mult3,), dtype=torch.float32) * 0.1

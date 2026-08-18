@@ -190,8 +190,7 @@ class DeepseekV4FP8Config(Fp8Config):
                         moe_config=layer.moe_config,
                     )
                 num_hidden_layers = (
-                    get_current_vllm_config()
-                    .model_config.get_total_num_hidden_layers()
+                    get_current_vllm_config().model_config.get_total_num_hidden_layers()
                 )
                 return Mxfp4MoEMethod(
                     layer.moe_config,

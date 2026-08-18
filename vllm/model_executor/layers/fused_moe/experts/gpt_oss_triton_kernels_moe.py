@@ -1057,9 +1057,10 @@ class UnfusedOAITritonExperts(LoRAExpertsMixin, BaseOAITritonExperts):
         # DeepSeek V4 uses this unfused W4A16 path on Thor. Keep the SM110
         # exception local so GPT-OSS and monolithic Triton selection do not
         # change without their own hardware validation.
-        return _triton_kernel_moe_supports_current_device(
-            allow_sm110=True
-        ) and has_triton_kernels()
+        return (
+            _triton_kernel_moe_supports_current_device(allow_sm110=True)
+            and has_triton_kernels()
+        )
 
     @staticmethod
     def _supports_activation(activation: MoEActivation) -> bool:
