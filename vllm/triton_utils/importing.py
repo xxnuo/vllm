@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
+import shutil
+import subprocess
 import types
 from importlib.metadata import version
 from importlib.util import find_spec
@@ -11,6 +13,66 @@ from vllm.platforms import current_platform
 from vllm.utils.math_utils import cdiv
 
 logger = init_logger(__name__)
+
+
+def _configure_triton_ptxas_for_new_gpus() -> None:
+    """Use the system ptxas for architectures newer than bundled Triton."""
+    if os.environ.get("TRITON_PTXAS_PATH"):
+        return
+
+    cuda_home = os.environ.get("CUDA_HOME", "/usr/local/cuda")
+    candidates = (
+        os.path.join(cuda_home, "bin", "ptxas"),
+        "/usr/local/cuda/bin/ptxas",
+        shutil.which("ptxas"),
+    )
+    system_ptxas = next(
+        (
+            path
+            for path in candidates
+            if path and os.path.isfile(path) and os.access(path, os.X_OK)
+        ),
+        None,
+    )
+    if system_ptxas is None:
+        return
+
+    try:
+        from triton.backends import backends
+
+        nvidia_backend = backends.get("nvidia")
+        if nvidia_backend is None or nvidia_backend.driver is None:
+            return
+        if not nvidia_backend.driver.is_active():
+            return
+
+        target = nvidia_backend.driver().get_current_target()
+        if target.arch < 110:
+            return
+
+        result = subprocess.run(
+            [system_ptxas, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return
+
+        os.environ["TRITON_PTXAS_PATH"] = system_ptxas
+        logger.info(
+            "Using system ptxas %s for Triton GPU architecture %s.",
+            system_ptxas,
+            target.arch,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+        logger.debug("Cannot configure system ptxas for Triton: %s", exc)
+    except Exception as exc:
+        # Triton driver APIs vary across versions; this must remain best-effort.
+        logger.debug("Failed to detect Triton GPU architecture: %s", exc)
+
+
+_configure_triton_ptxas_for_new_gpus()
 
 HAS_TRITON = (
     find_spec("triton") is not None

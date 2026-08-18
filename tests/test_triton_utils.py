@@ -5,6 +5,7 @@ import sys
 import types
 from unittest import mock
 
+from vllm.triton_utils import importing
 from vllm.triton_utils.importing import TritonLanguagePlaceholder, TritonPlaceholder
 
 
@@ -92,3 +93,53 @@ def test_no_triton_fallback():
         assert triton.__class__.__name__ == "TritonPlaceholder"
         assert triton.language.__class__.__name__ == "TritonLanguagePlaceholder"
         assert tl.__class__.__name__ == "TritonLanguagePlaceholder"
+
+
+def test_ptxas_configuration_respects_existing_path(monkeypatch):
+    monkeypatch.setenv("TRITON_PTXAS_PATH", "/custom/ptxas")
+    importing._configure_triton_ptxas_for_new_gpus()
+    assert importing.os.environ["TRITON_PTXAS_PATH"] == "/custom/ptxas"
+
+
+def test_ptxas_configuration_skips_old_arch(monkeypatch, tmp_path):
+    import sys
+
+    ptxas = tmp_path / "bin" / "ptxas"
+    ptxas.parent.mkdir()
+    ptxas.write_text("#!/bin/sh\nexit 0\n")
+    ptxas.chmod(0o755)
+    monkeypatch.delenv("TRITON_PTXAS_PATH", raising=False)
+    monkeypatch.setenv("CUDA_HOME", str(tmp_path))
+    driver = mock.Mock()
+    driver.is_active.return_value = True
+    driver.return_value.get_current_target.return_value.arch = 100
+    triton = types.ModuleType("triton")
+    triton.__path__ = []
+    backends = types.ModuleType("triton.backends")
+    backends.backends = {"nvidia": mock.Mock(driver=driver)}
+    monkeypatch.setitem(sys.modules, "triton", triton)
+    monkeypatch.setitem(sys.modules, "triton.backends", backends)
+    importing._configure_triton_ptxas_for_new_gpus()
+    assert "TRITON_PTXAS_PATH" not in importing.os.environ
+
+
+def test_ptxas_configuration_sets_system_path_for_new_arch(monkeypatch, tmp_path):
+    import sys
+
+    ptxas = tmp_path / "bin" / "ptxas"
+    ptxas.parent.mkdir()
+    ptxas.write_text("#!/bin/sh\nexit 0\n")
+    ptxas.chmod(0o755)
+    monkeypatch.delenv("TRITON_PTXAS_PATH", raising=False)
+    monkeypatch.setenv("CUDA_HOME", str(tmp_path))
+    driver = mock.Mock()
+    driver.is_active.return_value = True
+    driver.return_value.get_current_target.return_value.arch = 110
+    triton = types.ModuleType("triton")
+    triton.__path__ = []
+    backends = types.ModuleType("triton.backends")
+    backends.backends = {"nvidia": mock.Mock(driver=driver)}
+    monkeypatch.setitem(sys.modules, "triton", triton)
+    monkeypatch.setitem(sys.modules, "triton.backends", backends)
+    importing._configure_triton_ptxas_for_new_gpus()
+    assert importing.os.environ["TRITON_PTXAS_PATH"] == str(ptxas)
