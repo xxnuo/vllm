@@ -218,9 +218,7 @@ def deepseek_v4_fp8_einsum(
 ) -> None:
     capability = current_platform.get_device_capability()
     if capability is None or (capability.major, capability.minor) != (11, 0):
-        fp8_einsum(
-            equation, (a, a_scale), (b, b_scale), out, recipe=tuple(recipe)
-        )
+        fp8_einsum(equation, (a, a_scale), (b, b_scale), out, recipe=tuple(recipe))
         return
 
     if equation == "bhr,hdr->bhd" and b.dim() == 2:

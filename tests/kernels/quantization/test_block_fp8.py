@@ -177,12 +177,8 @@ def test_w8a8_block_fp8_matmul_e8m0_scales():
 
     As_fp32 = As.view(torch.uint8).to(torch.int32).mul(1 << 23).view(torch.float32)
     Bs_fp32 = Bs.view(torch.uint8).to(torch.int32).mul(1 << 23).view(torch.float32)
-    ref = native_w8a8_block_matmul(
-        A, B, As_fp32, Bs_fp32, block_size, torch.bfloat16
-    )
-    out = w8a8_triton_block_scaled_mm(
-        A, B, As, Bs, block_size, torch.bfloat16
-    )
+    ref = native_w8a8_block_matmul(A, B, As_fp32, Bs_fp32, block_size, torch.bfloat16)
+    out = w8a8_triton_block_scaled_mm(A, B, As, Bs, block_size, torch.bfloat16)
 
     rel_diff = torch.mean((out.float() - ref.float()).abs()) / torch.mean(
         ref.float().abs()
