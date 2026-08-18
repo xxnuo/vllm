@@ -14,12 +14,15 @@ from vllm.models.deepseek_v4.nvidia.flashmla import DeepseekV4FlashMLAAttention
 from vllm.models.deepseek_v4.sparse_mla import DeepseekV4FlashMLABackend
 from vllm.platforms.interface import DeviceCapability
 from vllm.v1.attention.ops.rocm_aiter_mla_sparse import (
-    # Despite the module name, these entry points are platform-neutral Triton
-    # fallbacks. CUDA leaves the ROCm-only tuned branches disabled.
     _rocm_sparse_attn_decode_triton as _triton_sparse_attn_decode,
+)
+from vllm.v1.attention.ops.rocm_aiter_mla_sparse import (
     _rocm_sparse_attn_prefill_triton as _triton_sparse_attn_prefill,
 )
 from vllm.v1.worker.workspace import current_workspace_manager
+
+# Despite the module name, these entry points are platform-neutral Triton
+# fallbacks. CUDA leaves the ROCm-only tuned branches disabled.
 
 if TYPE_CHECKING:
     from vllm.models.deepseek_v4.sparse_mla import DeepseekV4FlashMLAMetadata
