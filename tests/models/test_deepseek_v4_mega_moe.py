@@ -62,6 +62,20 @@ def test_deepseek_v4_thor_attention_requires_sm110(monkeypatch):
         _select_dsv4_attn_cls(config)
 
 
+def test_deepseek_v4_thor_sparse_uses_cuda_generic_triton_path():
+    from vllm.models.deepseek_v4.nvidia import thor
+    from vllm.v1.attention.ops import rocm_aiter_mla_sparse
+
+    assert thor._triton_sparse_attn_decode is (
+        rocm_aiter_mla_sparse._rocm_sparse_attn_decode_triton
+    )
+    assert thor._triton_sparse_attn_prefill is (
+        rocm_aiter_mla_sparse._rocm_sparse_attn_prefill_triton
+    )
+    assert not rocm_aiter_mla_sparse._ON_GFX942
+    assert not rocm_aiter_mla_sparse._ON_GFX950
+
+
 def test_deepseek_v4_mega_moe_expert_mapping():
     mapping = make_deepseek_v4_expert_params_mapping(2)
 
