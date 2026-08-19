@@ -560,10 +560,9 @@ def sparse_attn_indexer(
         elif decode_metadata.requires_padding or (
             num_decode_tokens % decode_lens.shape[0] != 0
         ):
-            # Also take the padded path when tokens don't divide evenly over
-            # the decode batch: requires_padding can be computed False for
-            # ragged warmup/mixed batches (seen on SM120 TP=2: 8 tokens over
-            # 6 seqs -> uniform reshape below would crash).
+            # Also take the padded path when CUDA Graph padding makes the token
+            # count indivisible by the otherwise uniform decode batch (seen on
+            # SM120 TP=2: 8 token slots over 6 seqs).
             # pad in edge case where we have short chunked prefill length <
             # decode_threshold since we unstrictly split
             # prefill and decode by decode_threshold

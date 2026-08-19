@@ -222,3 +222,70 @@ def test_skipped_k_cache_insert_accepts_no_k(
 
     assert result is topk_indices
     assert torch.all(topk_indices == -1)
+
+
+def test_graph_padded_uniform_decode_uses_pack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    indexer_metadata = make_indexer_metadata(
+        num_decodes=6,
+        num_decode_tokens=8,
+        num_prefills=0,
+        num_prefill_tokens=0,
+        slot_mapping=torch.arange(8),
+    )
+    decode_lens = torch.ones(6, dtype=torch.int32)
+    indexer_metadata.decode = SimpleNamespace(
+        decode_lens=decode_lens,
+        requires_padding=False,
+    )
+    monkeypatch.setattr(
+        sparse_indexer,
+        "get_forward_context",
+        lambda: SimpleNamespace(
+            attn_metadata={INDEXER_LAYER: indexer_metadata},
+            cudagraph_runtime_mode=CUDAGraphMode.PIECEWISE,
+        ),
+    )
+    monkeypatch.setattr(
+        sparse_indexer.current_platform, "fp8_dtype", lambda: torch.float16
+    )
+    monkeypatch.setattr(sparse_indexer, "is_deep_gemm_supported", lambda: False)
+    monkeypatch.setattr(
+        sparse_indexer,
+        "kv_cache_as_quant_view",
+        lambda kv_cache, head_dim, use_fp4_cache: kv_cache,
+    )
+
+    class Packed(Exception):
+        pass
+
+    q_quant = torch.arange(8, dtype=torch.float16).reshape(8, 1)
+
+    def pack(x, lengths, **kwargs):
+        assert torch.equal(x, q_quant)
+        assert lengths is decode_lens
+        raise Packed
+
+    monkeypatch.setattr(sparse_indexer, "pack_seq_triton", pack)
+
+    with pytest.raises(Packed):
+        sparse_indexer.sparse_attn_indexer(
+            torch.empty(8, 1),
+            INDEXER_LAYER,
+            torch.empty(1),
+            q_quant,
+            None,
+            None,
+            torch.empty(8, 1),
+            128,
+            "ue8m0",
+            1,
+            1,
+            4096,
+            4096,
+            torch.empty(8, 1, dtype=torch.int32),
+            True,
+            False,
+            "",
+        )
