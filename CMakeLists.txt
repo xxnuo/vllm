@@ -111,6 +111,22 @@ endif()
 #
 find_package(Torch REQUIRED)
 
+# Jetson build containers may expose a zero-byte libcuda placeholder through
+# CUDA::cuda_driver. Use the toolkit stub for extension link-time symbols.
+set(VLLM_CUDA_DRIVER_LIBRARY CUDA::cuda_driver)
+if (VLLM_TARGET_DEVICE STREQUAL "cuda")
+  find_library(VLLM_CUDA_DRIVER_STUB
+    NAMES cuda libcuda.so
+    PATHS
+      "${CUDAToolkit_LIBRARY_ROOT}/lib64/stubs"
+      "${CUDAToolkit_TARGET_DIR}/lib/stubs"
+      "${CMAKE_CUDA_COMPILER_TOOLKIT_ROOT}/lib64/stubs"
+    NO_DEFAULT_PATH)
+  if (VLLM_CUDA_DRIVER_STUB)
+    set(VLLM_CUDA_DRIVER_LIBRARY "${VLLM_CUDA_DRIVER_STUB}")
+  endif()
+endif()
+
 # Supported NVIDIA architectures.
 # This check must happen after find_package(Torch) because that's when CMAKE_CUDA_COMPILER_VERSION gets defined
 if(DEFINED CMAKE_CUDA_COMPILER_VERSION AND

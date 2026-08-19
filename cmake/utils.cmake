@@ -653,7 +653,7 @@ function (define_extension_target MOD_NAME)
   # dependencies that are not necessary and may not be installed.
   if (ARG_LANGUAGE STREQUAL "CUDA")
     target_link_libraries(${MOD_NAME} PRIVATE torch CUDA::cudart
-      "-Wl,--push-state,--no-as-needed" CUDA::cuda_driver "-Wl,--pop-state"
+      "-Wl,--push-state,--no-as-needed" ${VLLM_CUDA_DRIVER_LIBRARY} "-Wl,--pop-state"
       ${ARG_LIBRARIES})
   else()
     target_link_libraries(${MOD_NAME} PRIVATE torch ${TORCH_LIBRARIES} ${ARG_LIBRARIES})
