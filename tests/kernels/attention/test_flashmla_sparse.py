@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+from types import SimpleNamespace
+
 import pytest
 import torch
 
@@ -147,6 +149,87 @@ def test_deepseek_v4_prefill_chunk_planning_expands_for_short_sequences():
 
     # the adaptive plan keeps all 5 in one chunk
     assert chunk_plan == [(0, 5, 36, 103)]
+
+
+def test_thor_sparse_prefill_skips_empty_query_chunks(monkeypatch):
+    from vllm.models.deepseek_v4.nvidia import thor as thor_mod
+    from vllm.v1.attention.backends.mla.sparse_swa import DeepseekSparseSWAMetadata
+
+    calls: list[int] = []
+    workspace_shapes: list[tuple[int, ...]] = []
+    gather_calls = 0
+
+    class FakeWorkspaceManager:
+        def get_simultaneous(self, *specs):
+            workspace_shapes.extend(shape for shape, _ in specs)
+            return tuple(torch.empty(shape, dtype=dtype) for shape, dtype in specs)
+
+    def fake_gather(*args, **kwargs):
+        nonlocal gather_calls
+        gather_calls += 1
+
+    def fake_sparse_prefill(*, q, **kwargs):
+        calls.append(q.shape[0])
+        return torch.zeros_like(q)
+
+    monkeypatch.setattr(thor_mod, "current_workspace_manager", FakeWorkspaceManager)
+    monkeypatch.setattr(thor_mod, "dequantize_and_gather_k_cache", fake_gather)
+    monkeypatch.setattr(
+        thor_mod,
+        "combine_topk_swa_indices",
+        lambda indices, *args, **kwargs: (
+            torch.zeros((indices.shape[0], 1), dtype=torch.int32),
+            torch.ones(indices.shape[0], dtype=torch.int32),
+        ),
+    )
+    monkeypatch.setattr(thor_mod, "_triton_sparse_attn_prefill", fake_sparse_prefill)
+
+    attn = SimpleNamespace(
+        compress_ratio=1,
+        topk_indices_buffer=torch.zeros((4, 1), dtype=torch.int32),
+        PREFILL_CHUNK_SIZE=4,
+        window_size=4,
+        scale=1.0,
+        nope_head_dim=448,
+        rope_head_dim=64,
+        attn_sink=None,
+    )
+    query_start_loc = torch.tensor([0, 4, 4, 4, 4, 4], dtype=torch.int32)
+    prefill_seq_lens = torch.tensor([8, 0, 0, 0, 0], dtype=torch.int32)
+    swa_metadata = DeepseekSparseSWAMetadata(
+        block_table=torch.zeros((5, 1), dtype=torch.int32),
+        slot_mapping=torch.empty(0, dtype=torch.int64),
+        block_size=64,
+        query_start_loc_cpu=query_start_loc,
+        query_start_loc=query_start_loc,
+        num_decodes=0,
+        num_decode_tokens=0,
+        num_prefills=5,
+        num_prefill_tokens=4,
+        prefill_seq_lens=prefill_seq_lens,
+        prefill_seq_lens_cpu=prefill_seq_lens,
+        prefill_gather_lens=torch.tensor([7, 0, 0, 0, 0], dtype=torch.int32),
+        prefill_query_lens_cpu=torch.tensor([4, 0, 0, 0, 0], dtype=torch.int32),
+        prefill_window_size=4,
+        prefill_max_model_len=8,
+        prefill_max_num_batched_tokens=4,
+    )
+    query = torch.zeros((4, 1, 512), dtype=torch.bfloat16)
+
+    thor_mod.DeepseekV4ThorAttention._forward_prefill(
+        attn,
+        q=query,
+        positions=torch.empty(0, dtype=torch.int64),
+        compressed_k_cache=None,
+        swa_k_cache=torch.empty((1, 1, 512), dtype=torch.bfloat16),
+        output=torch.empty_like(query),
+        attn_metadata=None,
+        swa_metadata=swa_metadata,
+    )
+
+    assert calls == [4]
+    assert workspace_shapes == [(4, 7, 512)]
+    assert gather_calls == 1
 
 
 def test_flashinfer_sparse_indices_cache(monkeypatch):

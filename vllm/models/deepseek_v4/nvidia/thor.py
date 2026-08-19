@@ -144,6 +144,15 @@ class DeepseekV4ThorAttention(DeepseekV4FlashMLAAttention):
         )
         workspace_manager = current_workspace_manager()
         for chunk_start, chunk_end, chunk_n, chunk_m in chunk_plan:
+            query_start = (
+                query_start_loc_cpu[num_decodes + chunk_start] - prefill_token_base
+            )
+            query_end = (
+                query_start_loc_cpu[num_decodes + chunk_end] - prefill_token_base
+            )
+            if query_start == query_end:
+                continue
+
             chunk_size = chunk_end - chunk_start
             kv = workspace_manager.get_simultaneous(
                 ((chunk_size, chunk_m, q.shape[-1]), torch.bfloat16),
@@ -175,12 +184,6 @@ class DeepseekV4ThorAttention(DeepseekV4FlashMLAAttention):
                 offset=chunk_n,
             )
 
-            query_start = (
-                query_start_loc_cpu[num_decodes + chunk_start] - prefill_token_base
-            )
-            query_end = (
-                query_start_loc_cpu[num_decodes + chunk_end] - prefill_token_base
-            )
             combined_indices, combined_lens = combine_topk_swa_indices(
                 topk_indices[query_start:query_end],
                 query_start_loc[
