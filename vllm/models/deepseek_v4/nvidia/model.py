@@ -1538,8 +1538,5 @@ class DeepseekV4ForCausalLM(
         self.model.finalize_mega_moe_weights()
         self.model.finalize_mhc_broadcast_weights()
 
-    def process_weights_after_loading(self) -> None:
-        self.model.finalize_mhc_broadcast_weights()
-
     def get_expert_mapping(self) -> list[tuple[str, str, int, str]]:
         return self.model.get_expert_mapping()

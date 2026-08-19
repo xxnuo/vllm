@@ -73,9 +73,6 @@ class DeepseekV4ThorAttention(DeepseekV4FlashMLAAttention):
                     attn_metadata.block_table[:num_decodes],
                     attn_metadata.block_size // self.compress_ratio,
                     swa_metadata.is_valid_token[:num_decode_tokens],
-                    output_buffers=self._global_topk_output_buffers(
-                        self.topk_indices_buffer[:num_decode_tokens]
-                    ),
                 )
                 topk_indices = global_indices.view(num_decode_tokens, 1, -1)
             else:

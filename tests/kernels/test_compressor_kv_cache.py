@@ -91,7 +91,6 @@ def _make_compressor_forward_case(
     compressor._token_stride = 576
     compressor._scale_dim = 8
     compressor._use_two_stage_fused_compressor = False
-    compressor.eager_scratch_pool = None
     compressor.ape = torch.empty(0, device=device)
     compressor.norm = SimpleNamespace(
         weight=torch.ones(head_dim, dtype=torch.bfloat16, device=device)
