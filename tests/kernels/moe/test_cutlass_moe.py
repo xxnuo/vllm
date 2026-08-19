@@ -28,6 +28,7 @@ from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEQuantConfig,
     fp8_w8a8_moe_quant_config,
 )
+from vllm.model_executor.layers.fused_moe.experts import cutlass_moe
 from vllm.model_executor.layers.fused_moe.experts.cutlass_moe import (
     CutlassExpertsFp4,
     CutlassExpertsFp8,
@@ -80,6 +81,27 @@ def test_cutlass_moe_activation_metadata_tracks_shared_apply(
     expected = supports_shape and apply_moe_activation_supported(activation)
 
     assert experts_cls._supports_activation(activation) == expected
+
+
+@pytest.mark.parametrize(
+    ("capability", "grouped_gemm_supported", "expected"),
+    [(90, True, True), (90, False, False), (110, True, False)],
+)
+def test_cutlass_w4a8_requires_sm90(
+    monkeypatch, capability: int, grouped_gemm_supported: bool, expected: bool
+):
+    monkeypatch.setattr(
+        cutlass_moe.current_platform,
+        "is_device_capability",
+        lambda value: capability == value,
+    )
+    monkeypatch.setattr(
+        cutlass_moe,
+        "cutlass_group_gemm_supported",
+        lambda: grouped_gemm_supported,
+    )
+
+    assert CutlassExpertsW4A8Fp8._supports_current_device() is expected
 
 
 def test_cutlass_moe_forwards_shared_activation_parameters():
