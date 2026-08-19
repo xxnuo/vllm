@@ -9,6 +9,7 @@ import torch
 from vllm.model_executor.layers.fused_moe.routed_experts_capturer import (
     bind_routed_experts_capturer,
 )
+from vllm.models.deepseek_v4.nvidia import dspark as deepseek_v4_dspark
 from vllm.models.deepseek_v4.nvidia.dspark import DSparkDeepseekV4ForCausalLM
 from vllm.models.deepseek_v4.nvidia.model import (
     DeepseekV4ForCausalLM,
@@ -329,6 +330,30 @@ def test_deepseek_v4_drafter_pwal_hooks_finalize_mega_moe():
     DSparkDeepseekV4ForCausalLM.process_weights_after_loading(dspark)
 
     assert calls == ["mtp", "dspark"]
+
+
+def test_dspark_loader_skips_unknown_expert_scale(monkeypatch):
+    draft = DSparkDeepseekV4ForCausalLM.__new__(DSparkDeepseekV4ForCausalLM)
+    torch.nn.Module.__init__(draft)
+    draft.config = SimpleNamespace(
+        expert_dtype="fp4",
+        n_routed_experts=1,
+        num_attention_heads=1,
+    )
+    draft.quant_config = None
+    draft.pad_shared_expert = False
+    draft.model = torch.nn.Module()
+    draft.model.layers = [SimpleNamespace(ffn=SimpleNamespace(use_mega_moe=True))]
+    draft.model.confidence_head = None
+    draft.process_weights_after_loading = lambda: None
+    monkeypatch.setattr(
+        deepseek_v4_dspark, "get_tensor_model_parallel_world_size", lambda: 1
+    )
+    monkeypatch.setattr(deepseek_v4_dspark, "get_tensor_model_parallel_rank", lambda: 0)
+
+    loaded = draft.load_weights([("mtp.0.ffn.experts.0.w1.scale", torch.ones(1))])
+
+    assert loaded == set()
 
 
 @pytest.mark.skipif(
