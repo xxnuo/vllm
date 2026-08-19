@@ -75,8 +75,8 @@ __device__ __forceinline__ auto convert_to_uint32_v2(float x) -> uint32_t {
 }
 
 template <uint32_t BlockSize, uint32_t VecSize, typename Visit>
-__device__ __forceinline__ void for_each_score(
-    const float* __restrict__ scores, uint32_t length, Visit visit) {
+__device__ __forceinline__ void for_each_score(const float* __restrict__ scores,
+                                               uint32_t length, Visit visit) {
   static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4);
   const uint32_t tx = threadIdx.x;
 
@@ -90,15 +90,13 @@ __device__ __forceinline__ void for_each_score(
     for (uint32_t base = tx * VecSize; base < aligned_length;
          base += BlockSize * VecSize) {
       if constexpr (VecSize == 4) {
-        const float4 values =
-            *reinterpret_cast<const float4*>(scores + base);
+        const float4 values = *reinterpret_cast<const float4*>(scores + base);
         visit(base, values.x);
         visit(base + 1, values.y);
         visit(base + 2, values.z);
         visit(base + 3, values.w);
       } else {
-        const float2 values =
-            *reinterpret_cast<const float2*>(scores + base);
+        const float2 values = *reinterpret_cast<const float2*>(scores + base);
         visit(base, values.x);
         visit(base + 1, values.y);
       }
@@ -140,8 +138,8 @@ __device__ __forceinline__ void collect_pivot_matches(
 template <uint32_t TopK, uint32_t BlockSize, bool FuseOutputScan = false,
           uint32_t VecSize = 1, bool UseWideRadix = false>
 __device__ void exact_topk_rescan(const float* __restrict__ scores,
-                                  int32_t* __restrict__ output,
-                                  uint32_t length, void* _smem) {
+                                  int32_t* __restrict__ output, uint32_t length,
+                                  void* _smem) {
   static_assert(BlockSize >= RADIX);
   static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4);
   constexpr uint32_t kHistogramBins = UseWideRadix ? 2048 : RADIX;

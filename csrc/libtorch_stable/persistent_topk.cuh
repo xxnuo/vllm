@@ -489,11 +489,10 @@ __device__ __noinline__ void histogram_256_topk(
   if (thread_id < RADIX && shared_histogram[0][thread_id] > remaining_k &&
       shared_histogram[0][thread_id + 1] <= remaining_k) {
     shared_threshold_bin = thread_id;
-    const int threshold_bin_count = shared_histogram[0][thread_id] -
-                                    shared_histogram[0][thread_id + 1];
-    shared_buffered_count[0] = threshold_bin_count > MAX_BUFFERED_ITEMS
-                                   ? MAX_BUFFERED_ITEMS + 1
-                                   : 0;
+    const int threshold_bin_count =
+        shared_histogram[0][thread_id] - shared_histogram[0][thread_id + 1];
+    shared_buffered_count[0] =
+        threshold_bin_count > MAX_BUFFERED_ITEMS ? MAX_BUFFERED_ITEMS + 1 : 0;
     shared_output_count = 0;
   }
   __syncthreads();
@@ -1134,8 +1133,7 @@ __global__ void __launch_bounds__(FILTERED_TOPK_BLOCK_THREADS)
 
   auto* coarse_smem = reinterpret_cast<CoarseSmem*>(dynamic_smem);
   auto* s_coarse_histogram = coarse_smem->histogram;
-  auto* s_input_idx =
-      reinterpret_cast<int (*)[SMEM_INPUT_SIZE]>(dynamic_smem);
+  auto* s_input_idx = reinterpret_cast<int (*)[SMEM_INPUT_SIZE]>(dynamic_smem);
 
   int topk = top_k;
 
@@ -1202,8 +1200,7 @@ __global__ void __launch_bounds__(FILTERED_TOPK_BLOCK_THREADS)
 
   for (int i = 0; i < 2; ++i) {
     const int bin = coarse_bin0 + i;
-    if (s_coarse_histogram[bin] > topk &&
-        s_coarse_histogram[bin + 1] <= topk) {
+    if (s_coarse_histogram[bin] > topk && s_coarse_histogram[bin + 1] <= topk) {
       s_threshold_bin_id = bin;
       s_num_input[0] = 0;
       s_counter = 0;
