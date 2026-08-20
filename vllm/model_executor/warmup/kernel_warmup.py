@@ -285,6 +285,15 @@ def flashinfer_autotune(runner: "GPUModelRunner") -> None:
         randomize_inputs=True,
     )
 
+    if world.world_size > 1 and not envs.VLLM_FLASHINFER_AUTOTUNE_DISTRIBUTED_SYNC:
+        with (
+            torch.inference_mode(),
+            fi_utils.autotune(tune_mode=True, **autotune_kwargs),
+        ):
+            runner._dummy_run(**dummy_run_kwargs)
+        world.barrier()
+        return
+
     # Read cached autotune results and broadcast to all ranks.
     cached_results: bytes | None = None
     if is_leader and cache_path.exists():
