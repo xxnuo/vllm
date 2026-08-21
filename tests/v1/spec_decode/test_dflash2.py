@@ -180,8 +180,6 @@ def test_dflash_context_rope_cache_does_not_mutate_during_compile(monkeypatch):
 
     assert cache.dtype is torch.bfloat16
     assert model._rope_cos_sin_cache is original_cache
-
-
 def test_dflash2_loader_aliases_target_vocab_modules(monkeypatch):
     target_embed = object()
     target_lm_head = object()
