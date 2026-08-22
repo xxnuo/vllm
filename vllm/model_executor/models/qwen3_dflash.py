@@ -518,8 +518,10 @@ class DFlashQwen3Model(nn.Module):
                     f"weight_scale of {tuple(group_scale.shape)}."
                 )
 
-            # Slice to the K/V rows before unpacking to avoid materializing the
-            # discarded Q rows.
+            # Slice to the K/V rows *before* unpacking. The q rows are discarded
+            # either way, and both tensors are row-major over output features, so
+            # unpacking them first would trade ~3x the transient memory for
+            # nothing (2048 of 3072 rows at 27B geometry).
             packed = packed.data[attn.q_size :]
             group_scale = group_scale.data[attn.q_size :]
             out_f = int(packed.shape[0])
