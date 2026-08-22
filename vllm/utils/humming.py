@@ -21,6 +21,7 @@ _EXPORTS: dict[str, str] = {
     "may_quant_input": "humming.forward:may_quant_input",
     "prepare_layer_config": "humming.transform:prepare_layer_config",
     "transform_humming_tensors": "humming.transform:transform_humming_tensors",
+    "get_heuristics_class": "humming.tune:get_heuristics_class",
     "get_heuristics_config": "humming.tune:get_heuristics_config",
     "BaseInputSchema": "humming.schema:BaseInputSchema",
     "BaseWeightSchema": "humming.schema:BaseWeightSchema",

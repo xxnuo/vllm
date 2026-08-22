@@ -20,7 +20,8 @@ class GateLinear(ReplicatedLinear):
 
     1. cuteDSL ll_bf16_gemm (SM90+, M<=16, bf16 in, fp32 out,
        K divisible by 8)
-    2. DSV3 specialized kernel (SM90+, M<=16, H=7168 E=256/384, H=6144 E=256)
+    2. DSV3 specialized kernel (SM90+/validated SM110, M<=16 on SM90 or
+       M<=8 on SM110, H=7168 E=256/384, H=6144 E=256)
     3. fp32 specialized kernel  (SM90+, bf16/fp32 in, fp32 out, M<=32,
        (H, E) in {(3072, 256), (6144, 128), (6144, 256)})
     4. experimental bf16x3 CuteDSL kernel (opt-in, SM100, bf16 in, fp32 weight)
@@ -58,8 +59,14 @@ class GateLinear(ReplicatedLinear):
     ):
         is_hopper = current_platform.is_device_capability((9, 0))
         is_blackwell = current_platform.is_device_capability_family(100)
+        is_thor = current_platform.is_device_capability(110)
         can_use_specialized_kernels = (
             current_platform.is_cuda() and (is_hopper or is_blackwell) and not bias
+        )
+        can_use_dsv3_router_gemm = (
+            current_platform.is_cuda()
+            and (is_hopper or is_blackwell or is_thor)
+            and not bias
         )
 
         # If fp32 compute is required and no specialized kernel is available,
@@ -80,7 +87,7 @@ class GateLinear(ReplicatedLinear):
         # DSV3 specialized kernel eligibility (SM90+, exact dims)
         self.allow_specialized_router_gemm = can_use_specialized_kernels
         self.allow_dsv3_router_gemm = (
-            self.allow_specialized_router_gemm
+            can_use_dsv3_router_gemm
             and self.weight.dtype == torch.bfloat16
             and output_size in self.DSV3_SUPPORTED_NUM_EXPERTS
             and input_size in self.DSV3_SUPPORTED_HIDDEN_SIZES

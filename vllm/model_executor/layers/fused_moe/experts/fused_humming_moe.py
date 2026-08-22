@@ -318,11 +318,22 @@ class HummingExpertsBase(mk.FusedMoEExpertsModular):
     @staticmethod
     def _supports_current_device() -> bool:
         platform = current_platform
-        return (
+        if not (
             has_humming()
             and platform.is_cuda()
             and platform.has_device_capability((7, 5))
-        )
+        ):
+            return False
+
+        # Humming ships architecture-specific tuning tables. Avoid accepting a
+        # device that will fail later while the model is being loaded.
+        from vllm.utils.humming import get_heuristics_class
+
+        try:
+            get_heuristics_class()
+        except KeyError:
+            return False
+        return True
 
     @staticmethod
     def _supports_no_act_and_mul() -> bool:

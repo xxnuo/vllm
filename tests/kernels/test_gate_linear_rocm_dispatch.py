@@ -22,6 +22,9 @@ def _make_gate(
     *,
     is_rocm: bool,
     is_cuda: bool = False,
+    cuda_capability: int | None = None,
+    input_size: int = 2048,
+    output_size: int = 64,
     bias: bool = False,
     params_dtype: torch.dtype = torch.bfloat16,
     out_dtype: torch.dtype | None = torch.float32,
@@ -43,14 +46,16 @@ def _make_gate(
     platform = gate_linear_mod.current_platform
     monkeypatch.setattr(platform, "is_cuda", lambda: is_cuda)
     monkeypatch.setattr(platform, "is_rocm", lambda: is_rocm)
-    # Force the CUDA specialized-kernel gate off so ROCm eligibility is the
-    # only thing under test (these are the SM90/SM100 capability checks).
-    monkeypatch.setattr(platform, "is_device_capability", lambda *a, **k: False)
+    monkeypatch.setattr(
+        platform,
+        "is_device_capability",
+        lambda capability, **kwargs: capability == cuda_capability,
+    )
     monkeypatch.setattr(platform, "is_device_capability_family", lambda *a, **k: False)
 
     return GateLinear(
-        input_size=2048,
-        output_size=64,
+        input_size=input_size,
+        output_size=output_size,
         bias=bias,
         out_dtype=out_dtype,
         params_dtype=params_dtype,
@@ -83,6 +88,22 @@ def test_non_rocm_non_cuda_disables_fused_gemm(monkeypatch):
     # Neither the CUDA specialized path nor the ROCm branch applies.
     gate = _make_gate(monkeypatch, is_rocm=False, is_cuda=False)
     assert not gate.allow_cublas_router_gemm
+
+
+def test_sm110_enables_only_dsv3_router_gemm(monkeypatch):
+    gate = _make_gate(
+        monkeypatch,
+        is_rocm=False,
+        is_cuda=True,
+        cuda_capability=110,
+        input_size=7168,
+        output_size=256,
+        params_dtype=torch.bfloat16,
+        out_dtype=torch.float32,
+    )
+    assert not gate.allow_specialized_router_gemm
+    assert gate.allow_dsv3_router_gemm
+    assert gate._dsv3_max_batch == 8
 
 
 def test_rocm_set_out_dtype_enables_fused_gemm(monkeypatch):
