@@ -548,7 +548,6 @@ class DFlashQwen3Model(nn.Module):
         out = kv.to(act_dtype)
         if s.numel() == 1:
             return out * s.to(act_dtype).reshape(())
-
         s = s.reshape(-1)
 
         # A per-tensor scheme on a fused layer stores one scalar per shard
