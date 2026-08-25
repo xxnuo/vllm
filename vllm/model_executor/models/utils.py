@@ -887,7 +887,16 @@ def maybe_prefix(prefix: str, name: str) -> str:
 def get_draft_quant_config(
     vllm_config: VllmConfig,
 ) -> "QuantizationConfig | None":
-    # ... [existing docstring and setup] ...
+    """Get and prepare the quantization config for a draft model.
+
+    Draft models use their own quantization config rather than the target
+    model's config. When the draft architecture is resolvable, configure its
+    packed-module mapping so fused QKV and MLP weights are recognized while
+    loading quantized checkpoints.
+
+    Architecture resolution is best-effort here because some custom draft
+    configs are intentionally loadable without a registry entry.
+    """
     draft_model_config = vllm_config.speculative_config.draft_model_config
     draft_load_config = vllm_config.load_config
 
