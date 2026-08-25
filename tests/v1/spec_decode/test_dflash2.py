@@ -1,14 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
 import torch
+from torch import nn
 
-from vllm.model_executor.models.qwen3_dflash2 import _grouped_conv, _score_edges
+import vllm.compilation.backends as compilation_backends
+from vllm.config import CompilationMode
+from vllm.model_executor.models import qwen3_dflash, qwen3_dflash2
+from vllm.model_executor.models.qwen3_dflash2 import (
+    DFlash2Qwen3ForCausalLM,
+    _grouped_conv,
+    _score_edges,
+)
+from vllm.v1.worker.gpu.spec_decode.dflash import utils as dflash_utils
 from vllm.v1.worker.gpu.spec_decode.dflash.speculator import DFlashSpeculator
 from vllm.v1.worker.gpu.spec_decode.dflash2.speculator import DFlash2Speculator
+
+pytestmark = pytest.mark.skip_global_cleanup
 
 
 @pytest.mark.parametrize("block_size", [5, 8])
@@ -116,3 +128,128 @@ def test_selector_asks_for_fp32_proposal_logits():
 
     assert dtype is torch.float32
     assert fill == float("-inf")
+
+
+def test_dflash2_loader_aliases_target_vocab_modules(monkeypatch):
+    target_embed = object()
+    target_lm_head = object()
+    target_model = SimpleNamespace(
+        model=SimpleNamespace(embed_tokens=target_embed),
+        lm_head=target_lm_head,
+    )
+    draft_model = SimpleNamespace(
+        model=SimpleNamespace(embed_tokens=object()),
+        lm_head=object(),
+    )
+    vllm_config = SimpleNamespace(
+        speculative_config=SimpleNamespace(
+            draft_model_config=SimpleNamespace(hf_config=SimpleNamespace()),
+            attention_backend=None,
+            kv_cache_dtype=None,
+        ),
+        attention_config=SimpleNamespace(),
+        cache_config=SimpleNamespace(),
+    )
+
+    monkeypatch.setattr(dflash_utils, "get_model", lambda **_: draft_model)
+    monkeypatch.setattr(
+        dflash_utils, "get_pp_group", lambda: SimpleNamespace(world_size=1)
+    )
+    monkeypatch.setattr(dflash_utils, "replace", lambda obj, **_: obj)
+    monkeypatch.setattr(compilation_backends, "set_model_tag", lambda _: nullcontext())
+    monkeypatch.setattr(qwen3_dflash, "dflash_has_any_non_causal", lambda _: False)
+    monkeypatch.setattr(
+        qwen3_dflash, "dflash_target_rope_is_neox_style", lambda _: None
+    )
+
+    loaded_draft = dflash_utils.load_dflash_model(target_model, vllm_config)
+
+    assert loaded_draft.model.embed_tokens is target_embed
+    assert loaded_draft.lm_head is target_lm_head
+
+
+def test_dflash2_rejects_pipeline_parallelism():
+    vllm_config = SimpleNamespace(
+        parallel_config=SimpleNamespace(pipeline_parallel_size=2)
+    )
+
+    with pytest.raises(ValueError, match="does not support pipeline parallelism"):
+        DFlash2Qwen3ForCausalLM(vllm_config=vllm_config)
+
+
+def test_dflash2_constructs_decoder_layers_and_vocab_placeholders(monkeypatch):
+    layer_indices = []
+
+    class VocabModule(nn.Module):
+        def __init__(self, vocab_size, *_args, **_kwargs):
+            super().__init__()
+            self.vocab_size = vocab_size
+
+    class NoopModule(nn.Module):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+
+    def init_dflash2_layer(self, _vllm_config, *, layer_idx, **_kwargs):
+        nn.Module.__init__(self)
+        layer_indices.append(layer_idx)
+
+    def init_base_layer(*_args, **_kwargs):
+        pytest.fail("DFlash2 must not construct DFlashQwen3DecoderLayer")
+
+    hf_config = SimpleNamespace(
+        vocab_size=1024,
+        hidden_size=16,
+        num_hidden_layers=2,
+        rms_norm_eps=1e-5,
+        eagle_config={},
+        dflash_config={
+            "selector_rank": 2,
+            "selector_top_k": 2,
+        },
+    )
+    vllm_config = SimpleNamespace(
+        speculative_config=SimpleNamespace(
+            draft_model_config=SimpleNamespace(hf_config=hf_config)
+        ),
+        model_config=SimpleNamespace(
+            dtype=torch.float32,
+            get_num_layers=lambda _: 4,
+            get_vocab_size=lambda: 1024,
+        ),
+        parallel_config=SimpleNamespace(pipeline_parallel_size=1),
+        cache_config=SimpleNamespace(),
+        compilation_config=SimpleNamespace(mode=CompilationMode.NONE),
+    )
+
+    monkeypatch.setattr(qwen3_dflash, "get_draft_quant_config", lambda _: None)
+    monkeypatch.setattr(qwen3_dflash, "get_current_vllm_config", lambda: vllm_config)
+    monkeypatch.setattr(qwen3_dflash, "VocabParallelEmbedding", VocabModule)
+    monkeypatch.setattr(qwen3_dflash, "ParallelLMHead", VocabModule)
+    monkeypatch.setattr(qwen3_dflash, "ReplicatedLinear", NoopModule)
+    monkeypatch.setattr(qwen3_dflash, "RMSNorm", NoopModule)
+    monkeypatch.setattr(qwen3_dflash, "LogitsProcessor", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(qwen3_dflash2, "CandidateSelector", NoopModule)
+    monkeypatch.setattr(
+        qwen3_dflash2,
+        "LogitsProcessor",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(qwen3_dflash2, "set_model_tag", lambda _: nullcontext())
+    monkeypatch.setattr(
+        qwen3_dflash.DFlashQwen3DecoderLayer, "__init__", init_base_layer
+    )
+    monkeypatch.setattr(
+        qwen3_dflash2.DFlash2Qwen3DecoderLayer,
+        "__init__",
+        init_dflash2_layer,
+    )
+
+    model = DFlash2Qwen3ForCausalLM(vllm_config=vllm_config)
+
+    assert layer_indices == [0, 1]
+    assert all(
+        isinstance(layer, qwen3_dflash2.DFlash2Qwen3DecoderLayer)
+        for layer in model.model.layers
+    )
+    assert model.model.embed_tokens.vocab_size == 1
+    assert model.lm_head.vocab_size == 1

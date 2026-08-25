@@ -377,8 +377,6 @@ class DFlashQwen3DecoderLayer(nn.Module):
 
 @support_torch_compile
 class DFlashQwen3Model(nn.Module):
-    decoder_layer_cls = DFlashQwen3DecoderLayer
-
     hf_to_vllm_mapper = WeightsMapper(
         orig_to_new_substr={
             "midlayer.": "layers.0.",
@@ -396,6 +394,10 @@ class DFlashQwen3Model(nn.Module):
             ".up_proj": (".gate_up_proj", 1),
         },
     )
+    decoder_layer_cls = DFlashQwen3DecoderLayer
+    # A DFlash variant that always shares its vocabulary modules with the
+    # target can override this to avoid allocating an unused full vocabulary.
+    transient_vocab_size: int | None = None
 
     def __init__(
         self,
@@ -406,7 +408,12 @@ class DFlashQwen3Model(nn.Module):
     ) -> None:
         super().__init__()
         self.config = vllm_config.speculative_config.draft_model_config.hf_config
-        self.vocab_size = self.config.vocab_size
+        self.vocab_size = (
+            self.transient_vocab_size
+            if self.transient_vocab_size is not None
+            and vllm_config.parallel_config.pipeline_parallel_size == 1
+            else self.config.vocab_size
+        )
         self.quant_config = get_draft_quant_config(vllm_config)
 
         drafter_config = getattr(self.config, "eagle_config", {})
@@ -420,7 +427,7 @@ class DFlashQwen3Model(nn.Module):
         current_vllm_config = get_current_vllm_config()
 
         self.embed_tokens = VocabParallelEmbedding(
-            self.config.vocab_size,
+            self.vocab_size,
             self.config.hidden_size,
             prefix=maybe_prefix(prefix, "embed_tokens"),
         )
@@ -721,15 +728,21 @@ class DFlashQwen3ForCausalLM(Qwen3ForCausalLM):
             start_layer_id=target_layer_num,
         )
 
+        # DFlash2 always aliases these modules to the target after loading.
+        # Its one-token placeholders only exist until that handoff.
+        transient_vocab_size = self.model.transient_vocab_size
+        vocab_size = (
+            transient_vocab_size
+            if transient_vocab_size is not None
+            else self.config.draft_vocab_size
+        )
         logit_scale = getattr(self.config, "logit_scale", 1.0)
         self.lm_head = ParallelLMHead(
-            self.config.draft_vocab_size,
+            vocab_size,
             self.config.hidden_size,
             prefix=maybe_prefix(prefix, "lm_head"),
         )
-        self.logits_processor = LogitsProcessor(
-            self.config.draft_vocab_size, scale=logit_scale
-        )
+        self.logits_processor = LogitsProcessor(vocab_size, scale=logit_scale)
         target_vocab_size = vllm_config.model_config.get_vocab_size()
         if self.config.draft_vocab_size != target_vocab_size:
             self.draft_id_to_target_id = nn.Parameter(
