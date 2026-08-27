@@ -180,6 +180,8 @@ def test_dflash_context_rope_cache_does_not_mutate_during_compile(monkeypatch):
 
     assert cache.dtype is torch.bfloat16
     assert model._rope_cos_sin_cache is original_cache
+
+
 def test_dflash2_loader_aliases_target_vocab_modules(monkeypatch):
     target_embed = object()
     target_lm_head = object()
@@ -251,6 +253,8 @@ def test_dflash2_constructs_decoder_layers_and_vocab_placeholders(monkeypatch):
         hidden_size=16,
         num_hidden_layers=2,
         rms_norm_eps=1e-5,
+        use_aux_hidden_state=False,
+        mask_token_id=7,
         eagle_config={},
         dflash_config={
             "selector_rank": 2,
@@ -301,5 +305,7 @@ def test_dflash2_constructs_decoder_layers_and_vocab_placeholders(monkeypatch):
         isinstance(layer, qwen3_dflash2.DFlash2Qwen3DecoderLayer)
         for layer in model.model.layers
     )
+    assert model.model.use_aux_hidden_state is False
+    assert model.model.mask_token_id == 7
     assert model.model.embed_tokens.vocab_size == 1
     assert model.lm_head.vocab_size == 1

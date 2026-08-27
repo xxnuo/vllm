@@ -419,10 +419,10 @@ class DFlashQwen3Model(nn.Module):
         drafter_config = getattr(self.config, "eagle_config", {})
         drafter_config.update(getattr(self.config, "dflash_config", {}))
 
-        if drafter_config is not None and "use_aux_hidden_state" in drafter_config:
-            self.use_aux_hidden_state = drafter_config["use_aux_hidden_state"]
-        else:
-            self.use_aux_hidden_state = True
+        self.use_aux_hidden_state = drafter_config.get(
+            "use_aux_hidden_state",
+            getattr(self.config, "use_aux_hidden_state", True),
+        )
 
         current_vllm_config = get_current_vllm_config()
 
@@ -437,7 +437,9 @@ class DFlashQwen3Model(nn.Module):
         # at that slot id. Some checkpoints (XiaomiMiMo/MiMo-V2.5-Pro-FP4-DFlash) ship
         # with a separate mask embedding tensor to use instead. When present, we load it
         # and substitute it for embed_tokens[mask_token_id] when computing embeddings.
-        self.mask_token_id = drafter_config.get("mask_token_id")
+        self.mask_token_id = drafter_config.get(
+            "mask_token_id", getattr(self.config, "mask_token_id", None)
+        )
         self.mask_embedding = nn.Parameter(
             torch.zeros(self.config.hidden_size, dtype=vllm_config.model_config.dtype),
             requires_grad=False,
@@ -510,12 +512,18 @@ class DFlashQwen3Model(nn.Module):
 
             packed, group_scale = qkv.weight_packed, qkv.weight_scale
             in_f = int(qkv.input_size)
+            # ``unpack_from_int32`` reads 32-bit containers, and the bit width is
+            # derived from the column count on that assumption. An NVFP4 export
+            # packs two 4-bit values per uint8 instead, and that arithmetic gives
+            # a clean, wrong answer for it (bits=16, no remainder) rather than
+            # failing -- so the container dtype has to be checked, not inferred.
             bits, remainder = divmod(32 * int(packed.shape[1]), in_f)
-            if remainder or group_scale.dim() != 2:
+            if packed.dtype != torch.int32 or remainder or group_scale.dim() != 2:
                 raise ValueError(
-                    f"DFlash context-KV precompute cannot read a packed weight of "
-                    f"{tuple(packed.shape)} over {in_f} input features with a "
-                    f"weight_scale of {tuple(group_scale.shape)}."
+                    f"DFlash context-KV precompute cannot read a "
+                    f"{packed.dtype} packed weight of {tuple(packed.shape)} over "
+                    f"{in_f} input features with a weight_scale of "
+                    f"{tuple(group_scale.shape)}."
                 )
 
             # Slice to the K/V rows *before* unpacking. The q rows are discarded
